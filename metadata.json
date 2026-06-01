@@ -1,0 +1,6 @@
+{
+  "name": "Multi-Candidate Verified Auto Apply Portal",
+  "description": "Multi-candidate management platform with candidate profile setups, job portal verification workflows, real-time scraping, auto-apply execution status tracking, answer banks, and manual review queues.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
