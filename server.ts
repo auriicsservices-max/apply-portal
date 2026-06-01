@@ -259,32 +259,49 @@ function getInitialSeedData() {
   };
 }
 
-// Read database safely
+// Read database safely with in-memory persistence cache fallback for read-only filesystems (like Vercel)
+let memoryDB: any = null;
+
 function readDB() {
+  if (memoryDB) {
+    return memoryDB;
+  }
   try {
     const parentDir = path.dirname(DB_PATH);
     if (!fs.existsSync(parentDir)) {
-      fs.mkdirSync(parentDir, { recursive: true });
+      try {
+        fs.mkdirSync(parentDir, { recursive: true });
+      } catch (e) {
+        // Safe lock
+      }
     }
     if (!fs.existsSync(DB_PATH)) {
       const initial = getInitialSeedData();
-      fs.writeFileSync(DB_PATH, JSON.stringify(initial, null, 2), "utf8");
+      try {
+        fs.writeFileSync(DB_PATH, JSON.stringify(initial, null, 2), "utf8");
+      } catch (e) {
+        // Safe lock - read only filesystem
+      }
+      memoryDB = initial;
       return initial;
     }
     const data = fs.readFileSync(DB_PATH, "utf8");
-    return JSON.parse(data);
+    memoryDB = JSON.parse(data);
+    return memoryDB;
   } catch (err) {
-    console.error("Error reading database json", err);
-    return getInitialSeedData();
+    console.error("Error reading database json, falling back to memory database.", err);
+    memoryDB = getInitialSeedData();
+    return memoryDB;
   }
 }
 
 // Write database safely
 function writeDB(data: any) {
+  memoryDB = data;
   try {
     fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), "utf8");
   } catch (err) {
-    console.error("Error writing database json", err);
+    console.error("Error writing database json, persisting in-memory only:", err);
   }
 }
 
@@ -1964,8 +1981,16 @@ ${resumeText}
   res.json({ success: true, candidate, message: "Parsed via lightweight upload pipeline." });
 });
 
+// Export Express app as standard default so serverless platforms (Vercel Node) can import and construct dynamic handlers directly.
+export default app;
+
 // Configure Vite integration for building / DEV modes
 async function startServer() {
+  if (process.env.VERCEL) {
+    console.log("Vercel production environment detected. Skipping direct HTTP server socket-listener binding.");
+    return;
+  }
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
