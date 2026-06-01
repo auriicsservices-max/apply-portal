@@ -2,26 +2,28 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // 1. Global Catch-all Deny to implement an absolute Zero-Trust policy
+    // 1. Global Catch-all Deny to implement a absolute Zero-Trust policy
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Global helpers for express server operations (the server operates in unauthenticated mode)
+    // Global helpers
     function isSignedIn() {
-      return true; // Server-side requests are intrinsically trusted via isolated network deployment
+      return request.auth != null;
     }
 
     function isOwner(candidateId) {
-      return true;
+      return isSignedIn() && request.auth.uid == candidateId;
     }
 
+    // Role-based privilege check: admin conceptual override
     function isAdmin() {
-      return true;
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
+    // Core validation: candidate owner or admin check
     function isAuthorized(candidateId) {
-      return true;
+      return isOwner(candidateId) || isAdmin();
     }
 
     // Pattern guard for document IDs
@@ -41,16 +43,18 @@ service cloud.firestore {
 
     // 2. Candidate collection rules
     match /candidates/{candidateId} {
-      allow get: if true;
-      allow list: if true;
+      allow get: if isAuthorized(candidateId);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.id == request.auth.uid);
       
-      allow create: if isValidCandidate(incoming())
+      allow create: if isSignedIn() && (isOwner(candidateId) || isAdmin()) 
+                    && isValidCandidate(incoming())
                     && incoming().id == candidateId;
                     
-      allow update: if isValidCandidate(incoming())
+      allow update: if isAuthorized(candidateId) 
+                    && isValidCandidate(incoming())
                     && incoming().id == candidateId;
                     
-      allow delete: if true;
+      allow delete: if isAuthorized(candidateId);
 
       // Helper function for Candidate Entity Validation
       function isValidCandidate(cand) {
@@ -62,12 +66,13 @@ service cloud.firestore {
 
       // Credentials subcollection rule match
       match /credentials/{portalId} {
-        allow get: if true;
-        allow list: if true;
-        allow create, update: if isValidPortalCredential(incoming()) 
+        allow get: if isAuthorized(candidateId);
+        allow list: if isAuthorized(candidateId);
+        allow create, update: if isAuthorized(candidateId) 
+                              && isValidPortalCredential(incoming()) 
                               && incoming().candidateId == candidateId 
                               && incoming().portalId == portalId;
-        allow delete: if true;
+        allow delete: if isAuthorized(candidateId);
 
         function isValidPortalCredential(cred) {
           return cred.candidateId == candidateId
@@ -79,12 +84,13 @@ service cloud.firestore {
 
       // Jobs subcollection rule match
       match /jobs/{jobId} {
-        allow get: if true;
-        allow list: if true;
-        allow create, update: if isValidRealJob(incoming()) 
+        allow get: if isAuthorized(candidateId);
+        allow list: if isAuthorized(candidateId);
+        allow create, update: if isAuthorized(candidateId) 
+                              && isValidRealJob(incoming()) 
                               && incoming().candidateId == candidateId 
                               && incoming().id == jobId;
-        allow delete: if true;
+        allow delete: if isAuthorized(candidateId);
 
         function isValidRealJob(job) {
           return job.id == jobId
@@ -100,12 +106,13 @@ service cloud.firestore {
 
       // Questions subcollection rule match
       match /questions/{questionId} {
-        allow get: if true;
-        allow list: if true;
-        allow create, update: if isValidPortalQuestion(incoming()) 
+        allow get: if isAuthorized(candidateId);
+        allow list: if isAuthorized(candidateId);
+        allow create, update: if isAuthorized(candidateId) 
+                              && isValidPortalQuestion(incoming()) 
                               && incoming().candidateId == candidateId 
                               && incoming().id == questionId;
-        allow delete: if true;
+        allow delete: if isAuthorized(candidateId);
 
         function isValidPortalQuestion(q) {
           return q.id == questionId
@@ -118,12 +125,13 @@ service cloud.firestore {
 
       // AnswerBank subcollection rule match
       match /answerBank/{entryId} {
-        allow get: if true;
-        allow list: if true;
-        allow create, update: if isValidAnswerBankEntry(incoming()) 
+        allow get: if isAuthorized(candidateId);
+        allow list: if isAuthorized(candidateId);
+        allow create, update: if isAuthorized(candidateId) 
+                              && isValidAnswerBankEntry(incoming()) 
                               && incoming().candidateId == candidateId 
                               && incoming().id == entryId;
-        allow delete: if true;
+        allow delete: if isAuthorized(candidateId);
 
         function isValidAnswerBankEntry(ab) {
           return ab.id == entryId
@@ -136,9 +144,10 @@ service cloud.firestore {
 
       // Logs subcollection rule match
       match /logs/{logId} {
-        allow get: if true;
-        allow list: if true;
-        allow create: if isValidApplicationLog(incoming()) 
+        allow get: if isAuthorized(candidateId);
+        allow list: if isAuthorized(candidateId);
+        allow create: if isAuthorized(candidateId) 
+                      && isValidApplicationLog(incoming()) 
                       && incoming().candidateId == candidateId 
                       && incoming().id == logId;
         allow update, delete: if false; // Logs are immutable audit trails
@@ -153,12 +162,13 @@ service cloud.firestore {
 
       // Notifications subcollection rule match
       match /notifications/{notificationId} {
-        allow get: if true;
-        allow list: if true;
-        allow create, update: if isValidAppNotification(incoming()) 
+        allow get: if isAuthorized(candidateId);
+        allow list: if isAuthorized(candidateId);
+        allow create, update: if isAuthorized(candidateId) 
+                              && isValidAppNotification(incoming()) 
                               && incoming().candidateId == candidateId 
                               && incoming().id == notificationId;
-        allow delete: if true;
+        allow delete: if isAuthorized(candidateId);
 
         function isValidAppNotification(nt) {
           return nt.id == notificationId
@@ -172,12 +182,13 @@ service cloud.firestore {
 
       // ManualReviews subcollection rule match
       match /manualReviews/{reviewId} {
-        allow get: if true;
-        allow list: if true;
-        allow create, update: if isValidManualReviewQueueItem(incoming()) 
+        allow get: if isAuthorized(candidateId);
+        allow list: if isAuthorized(candidateId);
+        allow create, update: if isAuthorized(candidateId) 
+                              && isValidManualReviewQueueItem(incoming()) 
                               && incoming().candidateId == candidateId 
                               && incoming().id == reviewId;
-        allow delete: if true;
+        allow delete: if isAuthorized(candidateId);
 
         function isValidManualReviewQueueItem(mr) {
           return mr.id == reviewId

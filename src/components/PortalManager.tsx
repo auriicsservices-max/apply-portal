@@ -70,7 +70,6 @@ export default function PortalManager({
       recoveryEmail: recoveryEmailVal
     });
     
-    // Clear temporary passcode buffer
     const updatedPasscodes = { ...passcodes };
     delete updatedPasscodes[id];
     setPasscodes(updatedPasscodes);
@@ -133,7 +132,6 @@ export default function PortalManager({
   return (
     <div id="portal-manager-root" className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-5">
       
-      {/* Header */}
       <div>
         <div className="flex items-center gap-2">
           <Shield className="w-5 h-5 text-slate-900" />
@@ -146,10 +144,8 @@ export default function PortalManager({
         </p>
       </div>
 
-      {/* Selector and Workspace split */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         
-        {/* Left Side: Portals List switcher with verification status badges */}
         <div className="md:col-span-1 space-y-1.5 max-h-[350px] overflow-y-auto pr-1 border-r border-slate-100">
           {availablePortals.map((p) => {
             const cred = getPortalCred(p.id);
@@ -169,7 +165,6 @@ export default function PortalManager({
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-slate-950 font-sans">{p.name}</span>
                   
-                  {/* Enable Switch toggle button */}
                   <button
                     id={`toggle-enable-${p.id}`}
                     type="button"
@@ -198,17 +193,14 @@ export default function PortalManager({
           })}
         </div>
 
-        {/* Right Side: Active Portal Connection details work board */}
         <div className="md:col-span-2">
           {activePortalId ? (() => {
             const portalDef = availablePortals.find(p => p.id === activePortalId)!;
             const cred = getPortalCred(activePortalId);
-            const maskText = cred.passwordEncrypted ? "*".repeat(Math.min(10, cred.passwordEncrypted.length)) : "";
 
             return (
               <div className="space-y-5 animate-fadeIn">
                 
-                {/* Connection Title */}
                 <div className="flex items-start md:items-center justify-between border-b border-slate-100 pb-3">
                   <div>
                     <h3 className="text-sm font-bold text-slate-900">{portalDef.name} Settings</h3>
@@ -219,24 +211,17 @@ export default function PortalManager({
                   </div>
                 </div>
 
-                {/* INTERACTIVE DEMO ASSIST: Verification Interactive Flow Solver */}
                 {(cred.verificationStatus === "otp_required" || cred.verificationStatus === "captcha_required") && (
                   <div className="bg-slate-950 text-white rounded-xl p-4.5 space-y-3 shadow-md border border-slate-800 animate-pulse">
                     <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-400">
                       <Sparkles className="w-4 h-4 animate-spin text-amber-300" />
                       <span>Security Automation Sandbox Handover</span>
                     </div>
-                    
                     {cred.verificationStatus === "otp_required" ? (
                       <div className="space-y-2">
                         <p className="text-slate-300 text-[11.5px] leading-relaxed">
                           The system logged in successfully using credentials but flagged two-factor authentication. 
-                          We sent a mockup authentication token code to recovery. Type any 6-digit numeric OTP below to test session validation.
                         </p>
-                        <p className="text-[11px] text-amber-300 bg-amber-950/40 border border-amber-900/30 px-2.5 py-1.5 rounded-lg font-sans">
-                          💡 <strong>Testing Hint:</strong> Since this is a safe sandbox environment, you can enter <strong>any 6-digit numeric passcode (e.g., 123456, 999999)</strong> to successfully verify and link the portal immediately!
-                        </p>
-                        
                         <div className="flex items-center gap-2 max-w-sm pt-1">
                           <input
                             id={`input-otp-${activePortalId}`}
@@ -264,12 +249,11 @@ export default function PortalManager({
                     ) : (
                       <div className="space-y-2">
                         <p className="text-slate-300 text-[11.5px] leading-relaxed flex flex-col gap-1">
-                          <span>A security CAPTCHA is required to proceed. Resolve the image text to authorize chromium session handshakes:</span>
+                          <span>A security CAPTCHA is required to proceed. Resolve the image text:</span>
                           <span className="font-bold underline text-purple-300 bg-slate-900 px-3 py-1.5 rounded-lg border border-purple-800/40 text-center font-mono select-none tracking-widest text-sm mt-1.5">
                             {cred.captchaChallenge || "Z8W4K"}
                           </span>
                         </p>
-                        
                         <div className="flex items-center gap-2 max-w-sm pt-1">
                           <input
                             id={`input-captcha-${activePortalId}`}
@@ -292,15 +276,11 @@ export default function PortalManager({
                             <Send className="w-3.5 h-3.5" /> Unlock Gate
                           </button>
                         </div>
-                        <p className="text-[10px] text-slate-400">
-                          Hint: Case-insensitive solution is <span className="font-mono text-white">Z8W4K</span>
-                        </p>
                       </div>
                     )}
                   </div>
                 )}
 
-                {/* Error Banner */}
                 {cred.errorMessage && (
                   <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-[11.5px] text-rose-800 flex items-start gap-2">
                     <XCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
@@ -311,122 +291,120 @@ export default function PortalManager({
                 )}
 
                 {/* Form Schema Details */}
-                <form onSubmit={(e) => handleSaveCredential(activePortalId, e)} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-600 mb-1">Username / Account Email</label>
-                    <input
-                      type="text"
-                      name="username"
-                      defaultValue={cred.username}
-                      placeholder="username@email.com"
-                      className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-slate-950 text-xs focus:outline-none focus:ring-1 focus:ring-slate-950"
-                      required
-                    />
+                {activePortalId === "linkedin" && cred.verificationStatus !== "verified" ? (
+                  <div className="bg-sky-50 border border-sky-100 rounded-xl p-4 flex flex-col items-center gap-3 text-center">
+                    <h4 className="text-sm font-bold text-sky-900">Connect LinkedIn Account</h4>
+                    <p className="text-xs text-sky-700 max-w-sm">
+                      Authorize access to your LinkedIn profile to start fetching jobs automatically.
+                    </p>
+                    <a
+                      href={`/api/auth/linkedin?candidateId=${cred.candidateId}`}
+                      className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white font-semibold rounded-lg text-xs cursor-pointer"
+                    >
+                      Connect LinkedIn
+                    </a>
                   </div>
-
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                      Account Password Or Token
-                    </label>
-                    <div className="relative flex items-center">
+                ) : (
+                  <form onSubmit={(e) => handleSaveCredential(activePortalId, e)} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[11px] font-medium text-slate-600 mb-1">Username / Account Email</label>
                       <input
-                        type={showsPassword[activePortalId] ? "text" : "password"}
-                        name="password"
-                        value={passcodes[activePortalId] !== undefined ? passcodes[activePortalId] : cred.passwordEncrypted}
-                        onChange={(e) => setPasscodes({ ...passcodes, [activePortalId]: e.target.value })}
-                        placeholder={cred.passwordEncrypted ? "••••••••••••••••" : "Type portal password"}
-                        className="w-full bg-slate-50 border border-slate-200 pl-3 pr-10 py-2 rounded-lg text-slate-950 text-xs focus:outline-none focus:ring-1 focus:ring-slate-950 font-mono"
+                        type="text"
+                        name="username"
+                        defaultValue={cred.username}
+                        placeholder="username@email.com"
+                        className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-slate-950 text-xs focus:outline-none focus:ring-1 focus:ring-slate-950"
+                        required
                       />
-                      <button
-                        type="button"
-                        onClick={() => setShowsPassword({ ...showsPassword, [activePortalId]: !showsPassword[activePortalId] })}
-                        className="absolute right-2.5 text-slate-400 hover:text-slate-600 transition-colors"
-                      >
-                        {showsPassword[activePortalId] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
                     </div>
-                    {cred.passwordEncrypted && !passcodes[activePortalId] && (
-                      <span className="text-[10px] text-slate-400 mt-1 block">
-                        Saved password is encrypted. Plaintext hidden for safety compliance.
-                      </span>
-                    )}
-                  </div>
 
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-600 mb-1">Portal Login URL</label>
-                    <input
-                      type="url"
-                      name="loginUrl"
-                      defaultValue={cred.loginUrl || portalDef.defaultUrl}
-                      className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-slate-950 text-xs focus:outline-none"
-                    />
-                  </div>
+                    <div>
+                      <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                        Account Password Or Token
+                      </label>
+                      <div className="relative flex items-center">
+                        <input
+                          type={showsPassword[activePortalId] ? "text" : "password"}
+                          name="password"
+                          value={passcodes[activePortalId] !== undefined ? passcodes[activePortalId] : cred.passwordEncrypted}
+                          onChange={(e) => setPasscodes({ ...passcodes, [activePortalId]: e.target.value })}
+                          placeholder={cred.passwordEncrypted ? "••••••••••••••••" : "Type portal password"}
+                          className="w-full bg-slate-50 border border-slate-200 pl-3 pr-10 py-2 rounded-lg text-slate-950 text-xs focus:outline-none focus:ring-1 focus:ring-slate-950 font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowsPassword({ ...showsPassword, [activePortalId]: !showsPassword[activePortalId] })}
+                          className="absolute right-2.5 text-slate-400 hover:text-slate-600 transition-colors"
+                        >
+                          {showsPassword[activePortalId] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      {cred.passwordEncrypted && !passcodes[activePortalId] && (
+                        <span className="text-[10px] text-slate-400 mt-1 block">
+                          Saved password is encrypted. Plaintext hidden for safety compliance.
+                        </span>
+                      )}
+                    </div>
 
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-600 mb-1">Backup Recovery Email (Optional)</label>
-                    <input
-                      type="email"
-                      name="recoveryEmail"
-                      defaultValue={cred.recoveryEmail || ""}
-                      placeholder="backup@gmail.com"
-                      className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-slate-950 text-xs focus:outline-none"
-                    />
-                  </div>
+                    <div>
+                      <label className="block text-[11px] font-medium text-slate-600 mb-1">Portal Login URL</label>
+                      <input
+                        type="url"
+                        name="loginUrl"
+                        defaultValue={cred.loginUrl || portalDef.defaultUrl}
+                        className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-slate-950 text-xs focus:outline-none"
+                      />
+                    </div>
 
-                  <div className="md:col-span-2">
-                    <label className="block text-[11px] font-medium text-slate-600 mb-1">Configuration Comments / Automation Notes</label>
-                    <input
-                      type="text"
-                      name="notes"
-                      defaultValue={cred.notes || ""}
-                      placeholder="e.g. Requires corporate VPN or proxy details sometimes."
-                      className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-slate-950 text-xs focus:outline-none"
-                    />
-                  </div>
+                    <div>
+                      <label className="block text-[11px] font-medium text-slate-600 mb-1">Backup Recovery Email (Optional)</label>
+                      <input
+                        type="email"
+                        name="recoveryEmail"
+                        defaultValue={cred.recoveryEmail || ""}
+                        placeholder="backup@gmail.com"
+                        className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-slate-950 text-xs focus:outline-none"
+                      />
+                    </div>
 
-                  {/* Operational Information Timestamps */}
-                  <div className="md:col-span-2 grid grid-cols-3 gap-2.5 bg-slate-50 border border-slate-150 rounded-xl p-3 text-[10.5px] text-slate-500 font-sans">
-                    <div className="space-y-0.5">
-                      <span className="block font-semibold text-slate-700">Last Verified Status:</span>
-                      <span>{cred.lastVerifiedAt ? new Date(cred.lastVerifiedAt).toLocaleString() : "Never"}</span>
-                    </div>
-                    <div className="space-y-0.5">
-                      <span className="block font-semibold text-slate-700">Last Parsing Log:</span>
-                      <span>{cred.lastScrapedAt ? new Date(cred.lastScrapedAt).toLocaleString() : "Never"}</span>
-                    </div>
-                    <div className="space-y-0.5">
-                      <span className="block font-semibold text-slate-700">Last Auto-Apply submitted:</span>
-                      <span>{cred.lastAppliedAt ? new Date(cred.lastAppliedAt).toLocaleString() : "Never"}</span>
-                    </div>
-                  </div>
+                    <div className="md:col-span-2">
+                       <label className="block text-[11px] font-medium text-slate-600 mb-1">Configuration Comments / Automation Notes</label>
+                       <input
+                         type="text"
+                         name="notes"
+                         defaultValue={cred.notes || ""}
+                         placeholder="e.g. Requires corporate VPN or proxy details sometimes."
+                         className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-slate-950 text-xs focus:outline-none"
+                       />
+                     </div>
 
-                  {/* Actions buttons */}
-                  <div className="md:col-span-2 flex justify-between gap-2.5 pt-3 border-t border-slate-100">
-                    <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                      <HelpCircle className="w-4 h-4" />
-                      <span>Password guides: type "otp", "captcha" or "fail" to trigger interactive security flows!</span>
+                    <div className="md:col-span-2 flex justify-between gap-2.5 pt-3 border-t border-slate-100">
+                      <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                        <HelpCircle className="w-4 h-4" />
+                        <span>Password guides: type "otp", "captcha" or "fail" to trigger interactive security flows!</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          id={`btn-save-cred-${activePortalId}`}
+                          type="submit"
+                          className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-lg text-xs cursor-pointer bg-white"
+                        >
+                          Save Configuration
+                        </button>
+                        <button
+                          id={`btn-verify-${activePortalId}`}
+                          type="button"
+                          onClick={async () => {
+                            await onVerifyPortal(activePortalId);
+                          }}
+                          className="px-4 py-2 bg-slate-950 hover:bg-slate-800 text-white font-semibold rounded-lg text-xs cursor-pointer flex items-center gap-1"
+                        >
+                          <KeyRound className="w-3.5 h-3.5" /> Test Connection Flow
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button
-                        id={`btn-save-cred-${activePortalId}`}
-                        type="submit"
-                        className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-lg text-xs cursor-pointer bg-white"
-                      >
-                        Save Configuration
-                      </button>
-                      <button
-                        id={`btn-verify-${activePortalId}`}
-                        type="button"
-                        onClick={async () => {
-                          await onVerifyPortal(activePortalId);
-                        }}
-                        className="px-4 py-2 bg-slate-950 hover:bg-slate-800 text-white font-semibold rounded-lg text-xs cursor-pointer flex items-center gap-1"
-                      >
-                        <KeyRound className="w-3.5 h-3.5" /> Test Connection Flow
-                      </button>
-                    </div>
-                  </div>
-                </form>
+                  </form>
+                )}
               </div>
             );
           })() : (

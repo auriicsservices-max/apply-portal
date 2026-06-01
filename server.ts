@@ -2,95 +2,19 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
-import { initializeApp } from "firebase/app";
-import { 
-  getFirestore, 
-  collection, 
-  getDocs, 
-  doc, 
-  setDoc, 
-  deleteDoc
-} from "firebase/firestore";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Firebase SDK safely with robust fallback to prevent crash on non-configured environments
-let firebaseApp: any = null;
-let firestoreDb: any = null;
-
-try {
-  let firebaseConfig: any = null;
-  const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
-  if (fs.existsSync(firebaseConfigPath)) {
-    firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
-  } else if (process.env.FIREBASE_CONFIG_JSON) {
-    firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG_JSON);
-  }
-
-  if (firebaseConfig) {
-    firebaseApp = initializeApp(firebaseConfig);
-    firestoreDb = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
-    console.log("Firebase App & Firestore successfully initialized from config.");
-  } else {
-    console.warn("firebase-applet-config.json not found and FIREBASE_CONFIG_JSON env is missing. Operating in local JSON database mode.");
-  }
-} catch (err) {
-  console.error("Failed to initialize Firebase database integration:", err);
-}
-
-export const app = express();
+const app = express();
 const PORT = 3000;
 
 app.use(express.json());
-
-// Ensure Firestore cache is initialized, & block express responses until any pending Firestore writes settle
-app.use(async (req, res, next) => {
-  try {
-    await getOrInitFirestoreCache();
-  } catch (err) {
-    console.error("Express middleware: Firestore database initialization failed", err);
-  }
-
-  const originalJson = res.json;
-  const originalSend = res.send;
-  let isSending = false;
-
-  const awaitPendingAndSend = async (fn: Function, ...args: any[]) => {
-    if (isSending) return;
-    isSending = true;
-
-    // Await all current pending synchronization operations
-    while (pendingSyncPromises.size > 0) {
-      const promises = Array.from(pendingSyncPromises);
-      await Promise.all(promises);
-    }
-
-    return fn.apply(res, args);
-  };
-
-  res.json = function(...args: any[]) {
-    awaitPendingAndSend(originalJson, ...args).catch(err => {
-      console.error("Error waiting for Firestore inside res.json:", err);
-      originalJson.apply(res, args);
-    });
-    return this;
-  };
-
-  res.send = function(...args: any[]) {
-    awaitPendingAndSend(originalSend, ...args).catch(err => {
-      console.error("Error waiting for Firestore inside res.send:", err);
-      originalSend.apply(res, args);
-    });
-    return this;
-  };
-
-  next();
-});
 
 // Initialize Gemini safely
 let aiClient: GoogleGenAI | null = null;
@@ -112,7 +36,7 @@ function getGemini(): GoogleGenAI | null {
 }
 
 // Database JSON File Path
-const DB_PATH = path.join(process.cwd(), "src", "db.json");
+const DB_PATH = path.join(__dirname, "src", "db.json");
 
 // Helper to get initial DB seed structure
 function getInitialSeedData() {
@@ -335,173 +259,7 @@ function getInitialSeedData() {
   };
 }
 
-// Read database safely
 let dbInMemoryCache: any = null;
-const pendingSyncPromises = new Set<Promise<any>>();
-let initPromise: Promise<void> | null = null;
-
-async function getOrInitFirestoreCache() {
-  if (!initPromise) {
-    initPromise = initFirestoreCache();
-  }
-  return initPromise;
-}
-
-async function syncToFirestore(data: any) {
-  if (!firestoreDb) return;
-  try {
-    const currentCandIds = new Set(data.candidates.map((c: any) => c.id));
-    const previousCandIds = new Set((dbInMemoryCache?.candidates || []).map((c: any) => c.id));
-
-    // Delete removed candidates
-    for (const oldId of previousCandIds) {
-      if (!currentCandIds.has(oldId)) {
-        await deleteCandidateFromFirestore(oldId as string);
-      }
-    }
-
-    // Sync each candidate & subcollections
-    for (const cand of data.candidates) {
-      const candId = cand.id;
-      // Save Candidate
-      await setDoc(doc(firestoreDb, "candidates", candId), cand);
-
-      // Subcollections definitions
-      const subColls = [
-        { key: "credentials", idField: "portalId", dataList: data.credentials || [] },
-        { key: "jobs", idField: "id", dataList: data.jobs || [] },
-        { key: "questions", idField: "id", dataList: data.questions || [] },
-        { key: "answerBank", idField: "id", dataList: data.answerBank || [] },
-        { key: "logs", idField: "id", dataList: data.logs || [] },
-        { key: "notifications", idField: "id", dataList: data.notifications || [] },
-        { key: "manualReviews", idField: "id", dataList: data.manualReviews || [] }
-      ];
-
-      for (const sub of subColls) {
-        const items = sub.dataList.filter((item: any) => item.candidateId === candId);
-        const currentItemIds = new Set(items.map((item: any) => item[sub.idField]));
-
-        // Fetch existing from Firestore to check deletions
-        const ref = collection(firestoreDb, "candidates", candId, sub.key);
-        const snap = await getDocs(ref);
-        for (const d of snap.docs) {
-          if (!currentItemIds.has(d.id)) {
-            await deleteDoc(doc(firestoreDb, "candidates", candId, sub.key, d.id));
-          }
-        }
-
-        // Save/Update
-        for (const item of items) {
-          const idVal = item[sub.idField];
-          await setDoc(doc(firestoreDb, "candidates", candId, sub.key, idVal), item);
-        }
-      }
-    }
-  } catch (err) {
-    console.error("Firestore sync routine failed", err);
-  }
-}
-
-async function deleteCandidateFromFirestore(candidateId: string) {
-  try {
-    const subColls = ["credentials", "jobs", "questions", "answerBank", "logs", "notifications", "manualReviews"];
-    for (const sub of subColls) {
-      const snap = await getDocs(collection(firestoreDb, "candidates", candidateId, sub));
-      for (const d of snap.docs) {
-        await deleteDoc(doc(firestoreDb, "candidates", candidateId, sub, d.id));
-      }
-    }
-    await deleteDoc(doc(firestoreDb, "candidates", candidateId));
-    console.log(`Deleted candidate ${candidateId} from Firestore.`);
-  } catch (err) {
-    console.error(`Error deleting candidate ${candidateId} from Firestore`, err);
-  }
-}
-
-async function initFirestoreCache() {
-  try {
-    if (!firestoreDb) {
-      throw new Error("Cloud Firestore is not initialized or configured. Operating in local JSON mode.");
-    }
-    console.log("Checking Firestore for candidates...");
-    const candidatesSnapshot = await getDocs(collection(firestoreDb, "candidates"));
-    if (candidatesSnapshot.empty) {
-      console.log("Firestore database is empty. Seeding with default data...");
-      const initial = getInitialSeedData();
-      dbInMemoryCache = initial;
-      await syncToFirestore(initial);
-      console.log("Default seed sync'd to Firestore successfully.");
-      return;
-    }
-
-    const fetchedCandidates: any[] = [];
-    const fetchedCredentials: any[] = [];
-    const fetchedJobs: any[] = [];
-    const fetchedQuestions: any[] = [];
-    const fetchedAnswerBank: any[] = [];
-    const fetchedLogs: any[] = [];
-    const fetchedNotifications: any[] = [];
-    const fetchedManualReviews: any[] = [];
-
-    for (const candDoc of candidatesSnapshot.docs) {
-      const candId = candDoc.id;
-      fetchedCandidates.push(candDoc.data());
-
-      const [
-        credsSnap,
-        jobsSnap,
-        qsSnap,
-        abSnap,
-        logsSnap,
-        ntSnap,
-        mrSnap
-      ] = await Promise.all([
-        getDocs(collection(firestoreDb, "candidates", candId, "credentials")),
-        getDocs(collection(firestoreDb, "candidates", candId, "jobs")),
-        getDocs(collection(firestoreDb, "candidates", candId, "questions")),
-        getDocs(collection(firestoreDb, "candidates", candId, "answerBank")),
-        getDocs(collection(firestoreDb, "candidates", candId, "logs")),
-        getDocs(collection(firestoreDb, "candidates", candId, "notifications")),
-        getDocs(collection(firestoreDb, "candidates", candId, "manualReviews"))
-      ]);
-
-      credsSnap.forEach(d => fetchedCredentials.push(d.data()));
-      jobsSnap.forEach(d => fetchedJobs.push(d.data()));
-      qsSnap.forEach(d => fetchedQuestions.push(d.data()));
-      abSnap.forEach(d => fetchedAnswerBank.push(d.data()));
-      logsSnap.forEach(d => fetchedLogs.push(d.data()));
-      ntSnap.forEach(d => fetchedNotifications.push(d.data()));
-      mrSnap.forEach(d => fetchedManualReviews.push(d.data()));
-    }
-
-    dbInMemoryCache = {
-      candidates: fetchedCandidates,
-      credentials: fetchedCredentials,
-      jobs: fetchedJobs,
-      questions: fetchedQuestions,
-      answerBank: fetchedAnswerBank,
-      logs: fetchedLogs,
-      notifications: fetchedNotifications,
-      manualReviews: fetchedManualReviews
-    };
-    console.log("Firestore successfully synchronized to memory! Row counts:", {
-      candidates: dbInMemoryCache.candidates.length,
-      credentials: dbInMemoryCache.credentials.length,
-      jobs: dbInMemoryCache.jobs.length
-    });
-  } catch (err) {
-    console.error("Critical Firestore connection or read error, using local fallback:", err);
-    if (fs.existsSync(DB_PATH)) {
-      try {
-        dbInMemoryCache = JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
-      } catch (fErr) {
-        dbInMemoryCache = getInitialSeedData();
-      }
-    } else {
-      dbInMemoryCache = getInitialSeedData();
-    }
-  }
-}
 
 function readDB() {
   if (!dbInMemoryCache) {
@@ -525,16 +283,6 @@ function writeDB(data: any) {
   } catch (err) {
     console.error("Error writing fallback database json", err);
   }
-
-  // Sync to Firestore and track the promise
-  const syncPromise = syncToFirestore(data).catch(err => {
-    console.error("Asynchronous Firestore Synchronization failure:", err);
-  });
-
-  pendingSyncPromises.add(syncPromise);
-  syncPromise.finally(() => {
-    pendingSyncPromises.delete(syncPromise);
-  });
 }
 
 // ENDPOINTS
@@ -1377,6 +1125,64 @@ Strict constraint: Return ONLY valid JSON as an array. No wrap comments, no mark
 
   // Save Scraped Jobs making duplicate checks and applying match scoring
   // Rule: Prevent duplicates using: Job URL OR Company Name + Job Title + Location
+
+  // LinkedIn Auth Endpoints
+  app.get("/api/auth/linkedin", (req, res) => {
+    const { candidateId } = req.query;
+    const clientId = process.env.LINKEDIN_CLIENT_ID;
+    const redirectUri = `${process.env.APP_URL}/api/auth/linkedin/callback?candidateId=${candidateId}`;
+    const scope = "r_liteprofile r_emailaddress w_member_social";
+    
+    const authUrl = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;
+    res.redirect(authUrl);
+  });
+
+  app.get("/api/auth/linkedin/callback", async (req, res) => {
+    const { code, candidateId, error } = req.query;
+    if (error) return res.status(400).send(error);
+
+    try {
+      const clientId = process.env.LINKEDIN_CLIENT_ID;
+      const clientSecret = process.env.LINKEDIN_CLIENT_SECRET;
+      const redirectUri = `${process.env.APP_URL}/api/auth/linkedin/callback?candidateId=${candidateId}`;
+      
+      const response = await fetch(`https://www.linkedin.com/oauth/v2/accessToken`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: code as string,
+          redirect_uri: redirectUri,
+          client_id: clientId!,
+          client_secret: clientSecret!
+        })
+      });
+      const data = await response.json();
+      
+      // Store token (in-memory for now as requested)
+      const db = readDB();
+      const cred = db.credentials.find((c: any) => c.candidateId === candidateId && c.portalId === "linkedin");
+      if (cred) {
+        cred.accessToken = data.access_token;
+        cred.verificationStatus = "verified";
+        cred.lastVerifiedAt = new Date().toISOString();
+        writeDB(db);
+      }
+      
+      res.send("LinkedIn connection complete! You can close this window.");
+    } catch (err) {
+      console.error(err);
+      res.status(500).send("Failed to authorize LinkedIn.");
+    }
+  });
+
+  app.get("/api/jobs/linkedin", (req, res) => {
+    const { candidateId, domain } = req.query;
+    const db = readDB();
+    const jobs = db.jobs.filter((j: any) => j.candidateId === candidateId && j.portalId === "linkedin" && (domain ? j.jobDescription.toLowerCase().includes((domain as string).toLowerCase()) : true));
+    res.json(jobs);
+  });
+
   let newSavedCount = 0;
   let filteredCount = 0;
 
@@ -1974,11 +1780,8 @@ ${resumeText}
 
 // Configure Vite integration for building / DEV modes
 async function startServer() {
-  console.log("Initializing Cloud Firestore Cache...");
-  await initFirestoreCache();
 
   if (process.env.NODE_ENV !== "production") {
-    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -1997,11 +1800,4 @@ async function startServer() {
   });
 }
 
-if (!process.env.VERCEL) {
-  startServer();
-} else {
-  console.log("On Vercel: Initializing Cloud Firestore Cache...");
-  initFirestoreCache().catch(err => console.error("Firestore cache error on Vercel:", err));
-}
-
-export default app;
+startServer();
