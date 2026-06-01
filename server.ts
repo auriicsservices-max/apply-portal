@@ -48,6 +48,50 @@ const PORT = 3000;
 
 app.use(express.json());
 
+// Ensure Firestore cache is initialized, & block express responses until any pending Firestore writes settle
+app.use(async (req, res, next) => {
+  try {
+    await getOrInitFirestoreCache();
+  } catch (err) {
+    console.error("Express middleware: Firestore database initialization failed", err);
+  }
+
+  const originalJson = res.json;
+  const originalSend = res.send;
+  let isSending = false;
+
+  const awaitPendingAndSend = async (fn: Function, ...args: any[]) => {
+    if (isSending) return;
+    isSending = true;
+
+    // Await all current pending synchronization operations
+    while (pendingSyncPromises.size > 0) {
+      const promises = Array.from(pendingSyncPromises);
+      await Promise.all(promises);
+    }
+
+    return fn.apply(res, args);
+  };
+
+  res.json = function(...args: any[]) {
+    awaitPendingAndSend(originalJson, ...args).catch(err => {
+      console.error("Error waiting for Firestore inside res.json:", err);
+      originalJson.apply(res, args);
+    });
+    return this;
+  };
+
+  res.send = function(...args: any[]) {
+    awaitPendingAndSend(originalSend, ...args).catch(err => {
+      console.error("Error waiting for Firestore inside res.send:", err);
+      originalSend.apply(res, args);
+    });
+    return this;
+  };
+
+  next();
+});
+
 // Initialize Gemini safely
 let aiClient: GoogleGenAI | null = null;
 function getGemini(): GoogleGenAI | null {
@@ -293,6 +337,15 @@ function getInitialSeedData() {
 
 // Read database safely
 let dbInMemoryCache: any = null;
+const pendingSyncPromises = new Set<Promise<any>>();
+let initPromise: Promise<void> | null = null;
+
+async function getOrInitFirestoreCache() {
+  if (!initPromise) {
+    initPromise = initFirestoreCache();
+  }
+  return initPromise;
+}
 
 async function syncToFirestore(data: any) {
   if (!firestoreDb) return;
@@ -473,9 +526,14 @@ function writeDB(data: any) {
     console.error("Error writing fallback database json", err);
   }
 
-  // Sync to Firestore in the background
-  syncToFirestore(data).catch(err => {
+  // Sync to Firestore and track the promise
+  const syncPromise = syncToFirestore(data).catch(err => {
     console.error("Asynchronous Firestore Synchronization failure:", err);
+  });
+
+  pendingSyncPromises.add(syncPromise);
+  syncPromise.finally(() => {
+    pendingSyncPromises.delete(syncPromise);
   });
 }
 
