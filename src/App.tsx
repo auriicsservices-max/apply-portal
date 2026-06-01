@@ -58,20 +58,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [selectedCandidateId]);
 
-  useEffect(() => {
-    const handleOAuthMessage = async (event: MessageEvent) => {
-      const origin = event.origin;
-      if (!origin.endsWith(".run.app") && !origin.includes("localhost") && !origin.includes("asia-southeast1.run.app")) {
-        return;
-      }
-      if (event.data?.type === "OAUTH_AUTH_SUCCESS") {
-        await loadDatabase();
-      }
-    };
-    window.addEventListener("message", handleOAuthMessage);
-    return () => window.removeEventListener("message", handleOAuthMessage);
-  }, []);
-
   const handleSelectCandidate = (id: string) => {
     setSelectedCandidateId(id);
   };
@@ -438,7 +424,6 @@ export default function App() {
 
                 {activeTab === "portals" && (
                   <PortalManager
-                    candidateId={selectedCandidateId}
                     credentials={currentCredentials}
                     onUpdatePortal={handleUpdatePortal}
                     onVerifyPortal={handleVerifyPortal}

@@ -1,0 +1,210 @@
+{
+  "entities": {
+    "Candidate": {
+      "title": "Candidate",
+      "description": "Personal details, experience, skills, preferences, and resume data for recruitment candidate.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique Candidate identifier" },
+        "name": { "type": "string", "description": "Full name of candidate" },
+        "email": { "type": "string", "format": "email", "description": "Contact email address" },
+        "phone": { "type": "string", "description": "Candidate contact number" },
+        "location": { "type": "string", "description": "Candidate residential location" },
+        "preferredLocations": { "type": "array", "description": "Preferred work locations" },
+        "experienceYears": { "type": "integer", "description": "Years of professional experience" },
+        "currentRole": { "type": "string", "description": "Current professional title" },
+        "targetJobTitles": { "type": "array", "description": "Desired job roles" },
+        "skills": { "type": "array", "description": "Key technical skills" },
+        "domain": { "type": "string", "description": "General professional domain" },
+        "includeDomains": { "type": "array", "description": "Target sectors and categories" },
+        "excludeDomains": { "type": "array", "description": "Excluded sectors and types" },
+        "includeKeywords": { "type": "array", "description": "Favorable keywords to trigger match scoring" },
+        "excludeKeywords": { "type": "array", "description": "Negative keywords that filter out applications" },
+        "preferredSectors": { "type": "array", "description": "Favorable employer domains" },
+        "salaryExpectation": { "type": "string", "description": "Target compensation baseline" },
+        "noticePeriod": { "type": "string", "description": "Notice window duration" },
+        "workAuthorization": { "type": "string", "description": "Legal visa or citizen status description" },
+        "shiftPreference": { "type": "string", "description": "Target workday schedule preference" },
+        "resumeFilename": { "type": "string", "description": "File name of uploaded record resume" },
+        "resumeText": { "type": "string", "description": "Fully parsed raw resume content" },
+        "linkedinUrl": { "type": "string", "description": "Direct professional social handle" },
+        "portfolioUrl": { "type": "string", "description": "Candidate profile folder or GitHub direct url" },
+        "countryPreference": { "type": "string", "description": "Preferred work nation" }
+      },
+      "required": ["id", "name", "email", "phone"]
+    },
+    "PortalCredential": {
+      "title": "PortalCredential",
+      "description": "Candidate external portal connector details, session statuses, and configuration parameters.",
+      "type": "object",
+      "properties": {
+        "candidateId": { "type": "string", "description": "Associated Candidate ID reference" },
+        "portalId": { "type": "string", "description": "Unique provider name" },
+        "portalName": { "type": "string", "description": "Readable target job board name" },
+        "enabled": { "type": "boolean", "description": "Is automation trigger enabled for this portal" },
+        "username": { "type": "string", "description": "External sign-in coordinate username check" },
+        "passwordEncrypted": { "type": "string", "description": "Encrypted credentials value" },
+        "loginUrl": { "type": "string", "description": "Board sign-in portal gate url" },
+        "recoveryEmail": { "type": "string", "description": "Session recovery email verify checkpoint" },
+        "verificationStatus": { "type": "string", "enum": ["not_connected", "pending_verification", "verified", "login_failed", "captcha_required", "otp_required", "session_expired", "disabled"] },
+        "errorMessage": { "type": "string", "description": "Detail reports if status is failed" },
+        "lastVerifiedAt": { "type": "string", "description": "Verification date check" },
+        "lastScrapedAt": { "type": "string", "description": "Timestamp index of portal query" },
+        "lastAppliedAt": { "type": "string", "description": "Timestamp index of submit trigger" },
+        "notes": { "type": "string", "description": "Custom administrator reference remarks" },
+        "requiresOtpContent": { "type": "boolean"},
+        "captchaChallenge": { "type": "string" }
+      },
+      "required": ["candidateId", "portalId", "enabled", "verificationStatus"]
+    },
+    "RealJob": {
+      "title": "RealJob",
+      "description": "Factual job posting records scraped for matching profiles.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "candidateId": { "type": "string" },
+        "portalId": { "type": "string" },
+        "portalName": { "type": "string" },
+        "jobTitle": { "type": "string" },
+        "companyName": { "type": "string" },
+        "originalJobUrl": { "type": "string" },
+        "applyUrl": { "type": "string" },
+        "location": { "type": "string" },
+        "country": { "type": "string" },
+        "jobDescription": { "type": "string" },
+        "postedDate": { "type": "string" },
+        "scrapedAt": { "type": "string" },
+        "portalJobId": { "type": "string" },
+        "sourceVerificationStatus": { "type": "string", "enum": ["verified", "unverified"] },
+        "matchScore": { "type": "integer" },
+        "applyStatus": { "type": "string", "enum": ["scraped", "applying", "applied", "failed", "manual_review", "expired"] },
+        "appliedAt": { "type": "string" },
+        "errorLog": { "type": "string" }
+      },
+      "required": ["id", "candidateId", "portalId", "jobTitle", "companyName", "applyUrl", "matchScore", "applyStatus"]
+    },
+    "PortalQuestion": {
+      "title": "PortalQuestion",
+      "description": "Factual job-board application screening query details.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "candidateId": { "type": "string" },
+        "portalName": { "type": "string" },
+        "jobId": { "type": "string" },
+        "jobTitle": { "type": "string" },
+        "companyName": { "type": "string" },
+        "questionText": { "type": "string" },
+        "answerText": { "type": "string" },
+        "answerSource": { "type": "string", "enum": ["profile", "resume", "answer_bank", "manual"] },
+        "questionType": { "type": "string", "enum": ["text", "dropdown", "radio", "checkbox", "yes_no", "file_upload"] },
+        "required": { "type": "boolean" },
+        "options": { "type": "array" },
+        "dateAnswered": { "type": "string" },
+        "isHighConfidence": { "type": "boolean" }
+      },
+      "required": ["id", "candidateId", "questionText", "questionType", "required"]
+    },
+    "AnswerBankEntry": {
+      "title": "AnswerBankEntry",
+      "description": "Pre-configured and validated candidate QA banks for auto filling job forms.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "candidateId": { "type": "string" },
+        "questionKey": { "type": "string" },
+        "questionText": { "type": "string" },
+        "answerText": { "type": "string" }
+      },
+      "required": ["id", "candidateId", "questionKey", "questionText", "answerText"]
+    },
+    "ApplicationLog": {
+      "title": "ApplicationLog",
+      "description": "Chronological audit logs of syncs, checks, login verifications, and submit flows.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "candidateId": { "type": "string" },
+        "candidateName": { "type": "string" },
+        "portalName": { "type": "string" },
+        "jobTitle": { "type": "string" },
+        "companyName": { "type": "string" },
+        "jobUrl": { "type": "string" },
+        "actionPerformed": { "type": "string" },
+        "status": { "type": "string", "enum": ["success", "info", "warning", "error"] },
+        "errorMessage": { "type": "string" },
+        "screenshotUrl": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "candidateId", "actionPerformed", "status", "createdAt"]
+    },
+    "AppNotification": {
+      "title": "AppNotification",
+      "description": "User feedback messages for workflow updates and sync status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "candidateId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["success", "error", "warning", "info"] },
+        "createdAt": { "type": "string" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["id", "candidateId", "title", "message", "type", "createdAt", "read"]
+    },
+    "ManualReviewQueueItem": {
+      "title": "ManualReviewQueueItem",
+      "description": "Items pushed to manually-solved queues due to captcha, unknown screening questions, or login checks.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "candidateId": { "type": "string" },
+        "candidateName": { "type": "string" },
+        "jobId": { "type": "string" },
+        "jobTitle": { "type": "string" },
+        "companyName": { "type": "string" },
+        "portalName": { "type": "string" },
+        "reason": { "type": "string", "enum": ["login_failed", "captcha_required", "otp_required", "missing_profile_data", "missing_resume", "unknown_question", "low_confidence_answer", "job_link_expired", "apply_button_not_found", "portal_blocked_automation"] },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "candidateId", "reason", "description", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/candidates/{candidateId}": {
+      "schema": "Candidate",
+      "description": "List of core job hunting profiles managed within the recruitment system"
+    },
+    "/candidates/{candidateId}/credentials/{portalId}": {
+      "schema": "PortalCredential",
+      "description": "External sync configs and connection sessions for the candidate per job board portal"
+    },
+    "/candidates/{candidateId}/jobs/{jobId}": {
+      "schema": "RealJob",
+      "description": "Real, factual job records scraped, queried, and matched for this candidate"
+    },
+    "/candidates/{candidateId}/questions/{questionId}": {
+      "schema": "PortalQuestion",
+      "description": "Interactive application questions encountered during form fillers"
+    },
+    "/candidates/{candidateId}/answerBank/{entryId}": {
+      "schema": "AnswerBankEntry",
+      "description": "Saved answer bank of pre-approved responses for recurring screening fields"
+    },
+    "/candidates/{candidateId}/logs/{logId}": {
+      "schema": "ApplicationLog",
+      "description": "Trace and automation log entries describing scraping loops and submit sequences"
+    },
+    "/candidates/{candidateId}/notifications/{notificationId}": {
+      "schema": "AppNotification",
+      "description": "Workspace alerts and summaries delivered in real-time"
+    },
+    "/candidates/{candidateId}/manualReviews/{reviewId}": {
+      "schema": "ManualReviewQueueItem",
+      "description": "Flagged jobs or blockades needing custom user input to solve or resume applying"
+    }
+  }
+}

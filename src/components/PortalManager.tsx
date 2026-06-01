@@ -3,7 +3,6 @@ import { Shield, ToggleLeft, ToggleRight, CheckCircle2, XCircle, AlertTriangle, 
 import { PortalCredential } from "../types";
 
 interface Props {
-  candidateId: string;
   credentials: PortalCredential[];
   onUpdatePortal: (portalId: string, updatedFields: Partial<PortalCredential>) => Promise<void>;
   onVerifyPortal: (portalId: string) => Promise<void>;
@@ -12,7 +11,6 @@ interface Props {
 }
 
 export default function PortalManager({
-  candidateId,
   credentials,
   onUpdatePortal,
   onVerifyPortal,
@@ -24,25 +22,6 @@ export default function PortalManager({
   const [showsPassword, setShowsPassword] = useState<Record<string, boolean>>({});
   const [otpCodes, setOtpCodes] = useState<Record<string, string>>({});
   const [captchaSolutions, setCaptchaSolutions] = useState<Record<string, string>>({});
-
-  const handleDirectOAuthConnect = () => {
-    if (!activePortalId) return;
-    const width = 600;
-    const height = 700;
-    const left = window.screen.width / 2 - width / 2;
-    const top = window.screen.height / 2 - height / 2;
-    
-    // Open the server-side OAuth flow popup with specific candidate and portal details
-    const popup = window.open(
-      `/api/auth/oauth-popup?candidateId=${candidateId}&portalId=${activePortalId}`,
-      "oauth_popup",
-      `width=${width},height=${height},top=${top},left=${left},scrollbars=yes,resizable=yes`
-    );
-    
-    if (!popup) {
-      alert("Popup blocker active! Please allow popups to initiate the secure OAuth credentials connection.");
-    }
-  };
 
   const availablePortals = [
     { id: "linkedin", name: "LinkedIn", defaultUrl: "https://linkedin.com/login" },
@@ -240,45 +219,6 @@ export default function PortalManager({
                   </div>
                 </div>
 
-                {/* ADVANCED INTEGRATION OPTION: OAuth Connection Manager Card */}
-                <div className="bg-gradient-to-br from-indigo-50 to-slate-50 border border-indigo-150 rounded-xl p-4 space-y-3 shadow-xs">
-                  <div className="flex items-start justify-between">
-                    <div className="space-y-1">
-                      <span className="text-[10px] uppercase font-bold text-indigo-750 font-sans tracking-wide flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                        <span>INTEGRATED OAUTH SDK METHOD (RECOMMENDED)</span>
-                      </span>
-                      <h4 className="text-xs font-bold text-slate-900">
-                        {portalDef.name} Direct Account Verification Link
-                      </h4>
-                      <p className="text-[11px] text-slate-500 font-sans leading-relaxed">
-                        Rather than storing manual credentials, launch the direct {portalDef.name} OAuth SDK handshake. Authentic, secure session tokens are saved directly to candidate database logs.
-                      </p>
-                    </div>
-                    {activePortalId === "linkedin" && (
-                      <span className="text-[9.5px] bg-blue-100 text-blue-800 font-mono font-bold px-2 py-0.5 rounded-full border border-blue-200">
-                        react-native-linkedin-sdk v2
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-3 pt-1">
-                    <button
-                      id={`btn-oauth-direct-${activePortalId}`}
-                      type="button"
-                      onClick={handleDirectOAuthConnect}
-                      className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-sans font-bold text-[11px] rounded-lg shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <KeyRound className="w-3.5 h-3.5" />
-                      <span>Authenticate Securely with {portalDef.name}</span>
-                    </button>
-                    
-                    <span className="text-[10px] text-slate-400 font-sans italic">
-                      Opens direct auth window callback channel.
-                    </span>
-                  </div>
-                </div>
-
                 {/* INTERACTIVE DEMO ASSIST: Verification Interactive Flow Solver */}
                 {(cred.verificationStatus === "otp_required" || cred.verificationStatus === "captcha_required") && (
                   <div className="bg-slate-950 text-white rounded-xl p-4.5 space-y-3 shadow-md border border-slate-800 animate-pulse">
@@ -290,11 +230,11 @@ export default function PortalManager({
                     {cred.verificationStatus === "otp_required" ? (
                       <div className="space-y-2">
                         <p className="text-slate-300 text-[11.5px] leading-relaxed">
-                          The system connected successfully using credentials but has triggered two-factor authentication (MFA/OTP). 
-                          Please retrieve the dynamic code sent to your primary candidate channel and submit below to secure the session.
+                          The system logged in successfully using credentials but flagged two-factor authentication. 
+                          We sent a mockup authentication token code to recovery. Type any 6-digit numeric OTP below to test session validation.
                         </p>
                         <p className="text-[11px] text-amber-300 bg-amber-950/40 border border-amber-900/30 px-2.5 py-1.5 rounded-lg font-sans">
-                          💡 <strong>Secure Bypass Hint:</strong> To bypass OTP prompts entirely, we highly recommend trying the **Direct integrated OAuth SDK button** above. It links verified session tokens on the fly! Otherwise, input your dynamic 6-digit code below.
+                          💡 <strong>Testing Hint:</strong> Since this is a safe sandbox environment, you can enter <strong>any 6-digit numeric passcode (e.g., 123456, 999999)</strong> to successfully verify and link the portal immediately!
                         </p>
                         
                         <div className="flex items-center gap-2 max-w-sm pt-1">

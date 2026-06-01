@@ -5,11 +5,26 @@ import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { initializeApp } from "firebase/app";
+import { 
+  getFirestore, 
+  collection, 
+  getDocs, 
+  doc, 
+  setDoc, 
+  deleteDoc
+} from "firebase/firestore";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Initialize Firebase SDK using the generated config file
+const firebaseConfigPath = path.join(__dirname, "firebase-applet-config.json");
+const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
+const firebaseApp = initializeApp(firebaseConfig);
+const firestoreDb = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
 
 const app = express();
 const PORT = 3000;
@@ -259,50 +274,189 @@ function getInitialSeedData() {
   };
 }
 
-// Read database safely with in-memory persistence cache fallback for read-only filesystems (like Vercel)
-let memoryDB: any = null;
+// Read database safely
+let dbInMemoryCache: any = null;
 
-function readDB() {
-  if (memoryDB) {
-    return memoryDB;
-  }
+async function syncToFirestore(data: any) {
+  if (!firestoreDb) return;
   try {
-    const parentDir = path.dirname(DB_PATH);
-    if (!fs.existsSync(parentDir)) {
-      try {
-        fs.mkdirSync(parentDir, { recursive: true });
-      } catch (e) {
-        // Safe lock
+    const currentCandIds = new Set(data.candidates.map((c: any) => c.id));
+    const previousCandIds = new Set((dbInMemoryCache?.candidates || []).map((c: any) => c.id));
+
+    // Delete removed candidates
+    for (const oldId of previousCandIds) {
+      if (!currentCandIds.has(oldId)) {
+        await deleteCandidateFromFirestore(oldId as string);
       }
     }
-    if (!fs.existsSync(DB_PATH)) {
-      const initial = getInitialSeedData();
-      try {
-        fs.writeFileSync(DB_PATH, JSON.stringify(initial, null, 2), "utf8");
-      } catch (e) {
-        // Safe lock - read only filesystem
+
+    // Sync each candidate & subcollections
+    for (const cand of data.candidates) {
+      const candId = cand.id;
+      // Save Candidate
+      await setDoc(doc(firestoreDb, "candidates", candId), cand);
+
+      // Subcollections definitions
+      const subColls = [
+        { key: "credentials", idField: "portalId", dataList: data.credentials || [] },
+        { key: "jobs", idField: "id", dataList: data.jobs || [] },
+        { key: "questions", idField: "id", dataList: data.questions || [] },
+        { key: "answerBank", idField: "id", dataList: data.answerBank || [] },
+        { key: "logs", idField: "id", dataList: data.logs || [] },
+        { key: "notifications", idField: "id", dataList: data.notifications || [] },
+        { key: "manualReviews", idField: "id", dataList: data.manualReviews || [] }
+      ];
+
+      for (const sub of subColls) {
+        const items = sub.dataList.filter((item: any) => item.candidateId === candId);
+        const currentItemIds = new Set(items.map((item: any) => item[sub.idField]));
+
+        // Fetch existing from Firestore to check deletions
+        const ref = collection(firestoreDb, "candidates", candId, sub.key);
+        const snap = await getDocs(ref);
+        for (const d of snap.docs) {
+          if (!currentItemIds.has(d.id)) {
+            await deleteDoc(doc(firestoreDb, "candidates", candId, sub.key, d.id));
+          }
+        }
+
+        // Save/Update
+        for (const item of items) {
+          const idVal = item[sub.idField];
+          await setDoc(doc(firestoreDb, "candidates", candId, sub.key, idVal), item);
+        }
       }
-      memoryDB = initial;
-      return initial;
     }
-    const data = fs.readFileSync(DB_PATH, "utf8");
-    memoryDB = JSON.parse(data);
-    return memoryDB;
   } catch (err) {
-    console.error("Error reading database json, falling back to memory database.", err);
-    memoryDB = getInitialSeedData();
-    return memoryDB;
+    console.error("Firestore sync routine failed", err);
   }
 }
 
-// Write database safely
+async function deleteCandidateFromFirestore(candidateId: string) {
+  try {
+    const subColls = ["credentials", "jobs", "questions", "answerBank", "logs", "notifications", "manualReviews"];
+    for (const sub of subColls) {
+      const snap = await getDocs(collection(firestoreDb, "candidates", candidateId, sub));
+      for (const d of snap.docs) {
+        await deleteDoc(doc(firestoreDb, "candidates", candidateId, sub, d.id));
+      }
+    }
+    await deleteDoc(doc(firestoreDb, "candidates", candidateId));
+    console.log(`Deleted candidate ${candidateId} from Firestore.`);
+  } catch (err) {
+    console.error(`Error deleting candidate ${candidateId} from Firestore`, err);
+  }
+}
+
+async function initFirestoreCache() {
+  try {
+    console.log("Checking Firestore for candidates...");
+    const candidatesSnapshot = await getDocs(collection(firestoreDb, "candidates"));
+    if (candidatesSnapshot.empty) {
+      console.log("Firestore database is empty. Seeding with default data...");
+      const initial = getInitialSeedData();
+      dbInMemoryCache = initial;
+      await syncToFirestore(initial);
+      console.log("Default seed sync'd to Firestore successfully.");
+      return;
+    }
+
+    const fetchedCandidates: any[] = [];
+    const fetchedCredentials: any[] = [];
+    const fetchedJobs: any[] = [];
+    const fetchedQuestions: any[] = [];
+    const fetchedAnswerBank: any[] = [];
+    const fetchedLogs: any[] = [];
+    const fetchedNotifications: any[] = [];
+    const fetchedManualReviews: any[] = [];
+
+    for (const candDoc of candidatesSnapshot.docs) {
+      const candId = candDoc.id;
+      fetchedCandidates.push(candDoc.data());
+
+      const [
+        credsSnap,
+        jobsSnap,
+        qsSnap,
+        abSnap,
+        logsSnap,
+        ntSnap,
+        mrSnap
+      ] = await Promise.all([
+        getDocs(collection(firestoreDb, "candidates", candId, "credentials")),
+        getDocs(collection(firestoreDb, "candidates", candId, "jobs")),
+        getDocs(collection(firestoreDb, "candidates", candId, "questions")),
+        getDocs(collection(firestoreDb, "candidates", candId, "answerBank")),
+        getDocs(collection(firestoreDb, "candidates", candId, "logs")),
+        getDocs(collection(firestoreDb, "candidates", candId, "notifications")),
+        getDocs(collection(firestoreDb, "candidates", candId, "manualReviews"))
+      ]);
+
+      credsSnap.forEach(d => fetchedCredentials.push(d.data()));
+      jobsSnap.forEach(d => fetchedJobs.push(d.data()));
+      qsSnap.forEach(d => fetchedQuestions.push(d.data()));
+      abSnap.forEach(d => fetchedAnswerBank.push(d.data()));
+      logsSnap.forEach(d => fetchedLogs.push(d.data()));
+      ntSnap.forEach(d => fetchedNotifications.push(d.data()));
+      mrSnap.forEach(d => fetchedManualReviews.push(d.data()));
+    }
+
+    dbInMemoryCache = {
+      candidates: fetchedCandidates,
+      credentials: fetchedCredentials,
+      jobs: fetchedJobs,
+      questions: fetchedQuestions,
+      answerBank: fetchedAnswerBank,
+      logs: fetchedLogs,
+      notifications: fetchedNotifications,
+      manualReviews: fetchedManualReviews
+    };
+    console.log("Firestore successfully synchronized to memory! Row counts:", {
+      candidates: dbInMemoryCache.candidates.length,
+      credentials: dbInMemoryCache.credentials.length,
+      jobs: dbInMemoryCache.jobs.length
+    });
+  } catch (err) {
+    console.error("Critical Firestore connection or read error, using local fallback:", err);
+    if (fs.existsSync(DB_PATH)) {
+      try {
+        dbInMemoryCache = JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
+      } catch (fErr) {
+        dbInMemoryCache = getInitialSeedData();
+      }
+    } else {
+      dbInMemoryCache = getInitialSeedData();
+    }
+  }
+}
+
+function readDB() {
+  if (!dbInMemoryCache) {
+    try {
+      if (fs.existsSync(DB_PATH)) {
+        dbInMemoryCache = JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
+      } else {
+        dbInMemoryCache = getInitialSeedData();
+      }
+    } catch {
+      dbInMemoryCache = getInitialSeedData();
+    }
+  }
+  return dbInMemoryCache;
+}
+
 function writeDB(data: any) {
-  memoryDB = data;
+  dbInMemoryCache = data;
   try {
     fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), "utf8");
   } catch (err) {
-    console.error("Error writing database json, persisting in-memory only:", err);
+    console.error("Error writing fallback database json", err);
   }
+
+  // Sync to Firestore in the background
+  syncToFirestore(data).catch(err => {
+    console.error("Asynchronous Firestore Synchronization failure:", err);
+  });
 }
 
 // ENDPOINTS
@@ -725,247 +879,6 @@ app.post("/api/candidates/:candidateId/portals/:portalId/verify-captcha", (req, 
 
   writeDB(db);
   res.json(cred);
-});
-
-// 6.5 Premium Direct OAuth SDK Simulation Interface Popup
-app.get("/api/auth/oauth-popup", (req, res) => {
-  const db = readDB();
-  const { candidateId, portalId } = req.query;
-  const candidate = db.candidates.find((c: any) => c.id === candidateId);
-  const portalName = portalId === "linkedin" ? "LinkedIn" : portalId === "indeed" ? "Indeed" : portalId === "glassdoor" ? "Glassdoor" : "Job Portal";
-
-  const candidateName = candidate ? candidate.name : "Candidate";
-  const candidateEmail = candidate ? candidate.email : "";
-
-  // Set response headers to send HTML
-  res.setHeader("Content-Type", "text/html");
-
-  // Branded colors definition
-  let primaryColor = "#0a66c2"; // LinkedIn Blue
-  let hoverColor = "#004182";
-  let brandLogoSvg = `<svg class="w-8 h-8 text-[#0a66c2]" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.32 1.3v-1.11h-2.8v8.37h2.8v-4.87c0-.25.05-.5.12-.68a1.14 1.14 0 0 1 1-.78c.76 0 1 .52 1 .78v5.55h2.8M6.5 8.37a1.37 1.37 0 1 0 0-2.75 1.37 1.37 0 0 0 0 2.75M8 18.5V10.13H5.2V18.5H8z"/></svg>`;
-
-  if (portalId === "indeed") {
-    primaryColor = "#2557a7"; // Indeed Blue
-    hoverColor = "#123472";
-    brandLogoSvg = `<svg class="w-8 h-8 text-[#2557a7]" viewBox="0 0 24 24" fill="currentColor"><path d="M2.5 12a9.5 9.5 0 1 1 19 0v.5h-19V12zm2 1.5h15a7.5 7.5 0 0 1-15 0z"/></svg>`;
-  } else if (portalId === "glassdoor") {
-    primaryColor = "#0caa41"; // Glassdoor Green
-    hoverColor = "#08732c";
-    brandLogoSvg = `<svg class="w-8 h-8 text-[#0caa41]" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 14h-2v-4h2v4zm0-6h-2V8h2v2z"/></svg>`;
-  }
-
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Secure Connection to ${portalName}</title>
-      <script src="https://cdn.tailwindcss.com"></script>
-      <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-        body { font-family: 'Inter', sans-serif; }
-      </style>
-    </head>
-    <body class="bg-slate-50 min-h-screen flex flex-col justify-between text-slate-800">
-      
-      <!-- Upper Card Container -->
-      <div class="max-w-md w-full mx-auto p-6 bg-white border border-slate-200 shadow-lg rounded-2xl mt-8">
-        
-        <!-- Logo and Brand header -->
-        <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
-          <div class="flex items-center gap-2">
-            \${brandLogoSvg}
-            <span class="text-sm font-bold tracking-tight text-slate-900">\${portalName} Security Link</span>
-          </div>
-          <span class="text-[10px] bg-slate-100 text-slate-500 font-mono px-2 py-0.5 rounded-full border border-slate-200">
-            Secure SDK Mode
-          </span>
-        </div>
-
-        <div class="space-y-4">
-          <div class="space-y-1">
-            <h2 class="text-base font-bold text-slate-900">Link Candidate Profile</h2>
-            <p class="text-xs text-slate-500">
-              Authorize connection with candidate <strong class="text-slate-900 font-semibold">\${candidateName}</strong> (\${candidateEmail}).
-            </p>
-          </div>
-
-          <!-- OAuth requested permissions informational pane -->
-          <div class="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3 text-xs text-slate-600 space-y-2">
-            <span class="font-bold text-indigo-900 block text-[10.5px] uppercase">Permissions Requested:</span>
-            <ul class="list-disc pl-4 space-y-1 font-sans">
-              <li>Automatic background search of matched jobs</li>
-              <li>Pre-fill user dossiers automatically for match compliance</li>
-              <li>Headless form-filler application automation</li>
-              <li>Read real-time status and logs of user submits safely</li>
-            </ul>
-          </div>
-
-          <!-- Authentication dialog form -->
-          <form id="oauth-auth-form" class="space-y-3 pt-2">
-            <div>
-              <label class="block text-[11px] font-medium text-slate-500 mb-1">Enter Portal Email Address</label>
-              <input 
-                id="portal-email"
-                type="email" 
-                value="\${candidateEmail}" 
-                required 
-                placeholder="e.g. name@portal.com"
-                class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-slate-950 font-sans"
-              />
-            </div>
-
-            <div>
-              <label class="block text-[11px] font-medium text-slate-500 mb-1">Enter Secure Passcode / Session Token</label>
-              <input 
-                id="portal-token"
-                type="password" 
-                required
-                placeholder="Password or direct API token"
-                class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-slate-950 font-mono"
-              />
-              <span class="text-[10px] text-slate-400 mt-1 block">
-                Session tokens are immediately salted and encrypted inside the database.
-              </span>
-            </div>
-
-            <div class="pt-2">
-              <button 
-                type="submit" 
-                id="auth-submit-btn"
-                style="background-color: \${primaryColor};"
-                class="w-full text-white text-xs font-bold py-2 px-4 rounded-lg shadow-sm hover:opacity-90 transition-opacity cursor-pointer text-center flex items-center justify-center gap-1"
-              >
-                Verify & Authorize Connection
-              </button>
-            </div>
-          </form>
-
-        </div>
-      </div>
-
-      <!-- Consent Disclosures footer -->
-      <div class="text-center p-6 bg-slate-100 border-t border-slate-200 text-[10px] text-slate-400 font-sans leading-relaxed">
-        This app uses isolated sandboxing compliance policies under GDPR and SOC-2 standard controls. 
-        Authorized connections can be instantly severed or disabled from your credentials workspace.
-      </div>
-
-      <!-- Intercept script to process success events and postMessage back -->
-      <script>
-        document.getElementById("oauth-auth-form").addEventListener("submit", async (e) => {
-          e.preventDefault();
-          const email = document.getElementById("portal-email").value;
-          const token = document.getElementById("portal-token").value;
-          const submitBtn = document.getElementById("auth-submit-btn");
-
-          submitBtn.disabled = true;
-          submitBtn.textContent = "Connecting secure handshake...";
-          
-          try {
-            const resp = await fetch("/api/candidates/\${candidateId}/portals/\${portalId}/oauth-success", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ 
-                username: email,
-                passwordEncrypted: token
-              })
-            });
-
-            if (resp.ok) {
-              // Send message to parent
-              if (window.opener) {
-                window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', portalId: '\${portalId}' }, '*');
-                setTimeout(() => {
-                  window.close();
-                }, 800);
-              } else {
-                alert("Authorization complete! You can close this window now.");
-              }
-            } else {
-              alert("Verification failed during OAuth handshake sequence. Please check credentials.");
-              submitBtn.disabled = false;
-              submitBtn.textContent = "Verify & Authorize Connection";
-            }
-          } catch(err) {
-            console.error(err);
-            alert("Error: Mismatch during secure SSL handshake tunnel.");
-            submitBtn.disabled = false;
-            submitBtn.textContent = "Verify & Authorize Connection";
-          }
-        });
-      </script>
-
-    </body>
-    </html>
-  `);
-});
-
-// Endpoint to persist OAuth verified success
-app.post("/api/candidates/:candidateId/portals/:portalId/oauth-success", (req, res) => {
-  const db = readDB();
-  const { candidateId, portalId } = req.params;
-  const { username, passwordEncrypted } = req.body;
-
-  const candidate = db.candidates.find((c: any) => c.id === candidateId);
-  let cred = db.credentials.find((c: any) => c.candidateId === candidateId && c.portalId === portalId);
-
-  if (!cred) {
-    cred = {
-      candidateId,
-      portalId,
-      portalName: portalId.charAt(0).toUpperCase() + portalId.slice(1),
-      enabled: true,
-      username: username || (candidate ? candidate.email : ""),
-      passwordEncrypted: passwordEncrypted || "linkedin_sdk_active_success_token",
-      loginUrl: `https://${portalId}.com/login`,
-      verificationStatus: "verified"
-    };
-    db.credentials.push(cred);
-  } else {
-    cred.username = username || cred.username || (candidate ? candidate.email : "");
-    cred.passwordEncrypted = passwordEncrypted || cred.passwordEncrypted || "linkedin_sdk_active_success_token";
-    cred.verificationStatus = "verified";
-    cred.enabled = true;
-  }
-
-  cred.lastVerifiedAt = new Date().toISOString();
-  cred.errorMessage = undefined;
-  cred.captchaChallenge = undefined;
-
-  const candidateName = candidate ? candidate.name : "Candidate";
-  const portalName = cred.portalName;
-
-  // Sync state: remove corresponding manual reviews
-  db.manualReviews = db.manualReviews.filter((mr: any) => mr.candidateId === candidateId && mr.portalName === portalName);
-
-  // Push successful authentic trace audits
-  db.logs.push({
-    id: `log-${Date.now()}-oauth-success`,
-    candidateId,
-    candidateName,
-    portalName,
-    jobTitle: "Direct OAuth Handshake",
-    companyName: "OAuth SDK Platform",
-    jobUrl: cred.loginUrl,
-    actionPerformed: `Authorized via react-native-linkedin-sdk / Web credentials popup. Secure authorization token linked successfully.`,
-    status: "success",
-    createdAt: new Date().toISOString()
-  });
-
-  db.notifications.push({
-    id: `nt-${Date.now()}-oauth`,
-    candidateId,
-    title: "Secure Account Connected",
-    message: `Direct OAUTH handshake completed successfully for ${candidateName} on ${portalName}.`,
-    type: "success",
-    createdAt: new Date().toISOString(),
-    read: false
-  });
-
-  writeDB(db);
-  res.json({ success: true, credential: cred });
 });
 
 // A robust candidate-wise filtering and match boosting algorithm
@@ -1981,15 +1894,10 @@ ${resumeText}
   res.json({ success: true, candidate, message: "Parsed via lightweight upload pipeline." });
 });
 
-// Export Express app as standard default so serverless platforms (Vercel Node) can import and construct dynamic handlers directly.
-export default app;
-
 // Configure Vite integration for building / DEV modes
 async function startServer() {
-  if (process.env.VERCEL) {
-    console.log("Vercel production environment detected. Skipping direct HTTP server socket-listener binding.");
-    return;
-  }
+  console.log("Initializing Cloud Firestore Cache...");
+  await initFirestoreCache();
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

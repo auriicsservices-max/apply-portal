@@ -1,0 +1,202 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 1. Global Catch-all Deny to implement a absolute Zero-Trust policy
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(candidateId) {
+      return isSignedIn() && request.auth.uid == candidateId;
+    }
+
+    // Role-based privilege check: admin conceptual override
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Core validation: candidate owner or admin check
+    function isAuthorized(candidateId) {
+      return isOwner(candidateId) || isAdmin();
+    }
+
+    // Pattern guard for document IDs
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Expressive incoming state accessor
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // Expressive existing state accessor
+    function existing() {
+      return resource.data;
+    }
+
+    // 2. Candidate collection rules
+    match /candidates/{candidateId} {
+      allow get: if isAuthorized(candidateId);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.id == request.auth.uid);
+      
+      allow create: if isSignedIn() && (isOwner(candidateId) || isAdmin()) 
+                    && isValidCandidate(incoming())
+                    && incoming().id == candidateId;
+                    
+      allow update: if isAuthorized(candidateId) 
+                    && isValidCandidate(incoming())
+                    && incoming().id == candidateId;
+                    
+      allow delete: if isAuthorized(candidateId);
+
+      // Helper function for Candidate Entity Validation
+      function isValidCandidate(cand) {
+        return cand.id is string && cand.id.size() <= 128
+          && cand.name is string && cand.name.size() <= 256
+          && cand.email is string && cand.email.size() <= 256
+          && cand.phone is string && cand.phone.size() <= 50;
+      }
+
+      // Credentials subcollection rule match
+      match /credentials/{portalId} {
+        allow get: if isAuthorized(candidateId);
+        allow list: if isAuthorized(candidateId);
+        allow create, update: if isAuthorized(candidateId) 
+                              && isValidPortalCredential(incoming()) 
+                              && incoming().candidateId == candidateId 
+                              && incoming().portalId == portalId;
+        allow delete: if isAuthorized(candidateId);
+
+        function isValidPortalCredential(cred) {
+          return cred.candidateId == candidateId
+            && cred.portalId == portalId
+            && cred.enabled is bool
+            && cred.verificationStatus in ["not_connected", "pending_verification", "verified", "login_failed", "captcha_required", "otp_required", "session_expired", "disabled"];
+        }
+      }
+
+      // Jobs subcollection rule match
+      match /jobs/{jobId} {
+        allow get: if isAuthorized(candidateId);
+        allow list: if isAuthorized(candidateId);
+        allow create, update: if isAuthorized(candidateId) 
+                              && isValidRealJob(incoming()) 
+                              && incoming().candidateId == candidateId 
+                              && incoming().id == jobId;
+        allow delete: if isAuthorized(candidateId);
+
+        function isValidRealJob(job) {
+          return job.id == jobId
+            && job.candidateId == candidateId
+            && job.portalId is string
+            && job.jobTitle is string && job.jobTitle.size() <= 256
+            && job.companyName is string && job.companyName.size() <= 256
+            && job.applyUrl is string && job.applyUrl.size() <= 2048
+            && job.matchScore is int && job.matchScore >= 0 && job.matchScore <= 100
+            && job.applyStatus in ["scraped", "applying", "applied", "failed", "manual_review", "expired"];
+        }
+      }
+
+      // Questions subcollection rule match
+      match /questions/{questionId} {
+        allow get: if isAuthorized(candidateId);
+        allow list: if isAuthorized(candidateId);
+        allow create, update: if isAuthorized(candidateId) 
+                              && isValidPortalQuestion(incoming()) 
+                              && incoming().candidateId == candidateId 
+                              && incoming().id == questionId;
+        allow delete: if isAuthorized(candidateId);
+
+        function isValidPortalQuestion(q) {
+          return q.id == questionId
+            && q.candidateId == candidateId
+            && q.questionText is string && q.questionText.size() <= 1024
+            && q.questionType in ["text", "dropdown", "radio", "checkbox", "yes_no", "file_upload"]
+            && q.required is bool;
+        }
+      }
+
+      // AnswerBank subcollection rule match
+      match /answerBank/{entryId} {
+        allow get: if isAuthorized(candidateId);
+        allow list: if isAuthorized(candidateId);
+        allow create, update: if isAuthorized(candidateId) 
+                              && isValidAnswerBankEntry(incoming()) 
+                              && incoming().candidateId == candidateId 
+                              && incoming().id == entryId;
+        allow delete: if isAuthorized(candidateId);
+
+        function isValidAnswerBankEntry(ab) {
+          return ab.id == entryId
+            && ab.candidateId == candidateId
+            && ab.questionKey is string && ab.questionKey.size() <= 256
+            && ab.questionText is string && ab.questionText.size() <= 1024
+            && ab.answerText is string && ab.answerText.size() <= 1024;
+        }
+      }
+
+      // Logs subcollection rule match
+      match /logs/{logId} {
+        allow get: if isAuthorized(candidateId);
+        allow list: if isAuthorized(candidateId);
+        allow create: if isAuthorized(candidateId) 
+                      && isValidApplicationLog(incoming()) 
+                      && incoming().candidateId == candidateId 
+                      && incoming().id == logId;
+        allow update, delete: if false; // Logs are immutable audit trails
+
+        function isValidApplicationLog(log) {
+          return log.id == logId
+            && log.candidateId == candidateId
+            && log.actionPerformed is string && log.actionPerformed.size() <= 4096
+            && log.status in ["success", "info", "warning", "error"];
+        }
+      }
+
+      // Notifications subcollection rule match
+      match /notifications/{notificationId} {
+        allow get: if isAuthorized(candidateId);
+        allow list: if isAuthorized(candidateId);
+        allow create, update: if isAuthorized(candidateId) 
+                              && isValidAppNotification(incoming()) 
+                              && incoming().candidateId == candidateId 
+                              && incoming().id == notificationId;
+        allow delete: if isAuthorized(candidateId);
+
+        function isValidAppNotification(nt) {
+          return nt.id == notificationId
+            && nt.candidateId == candidateId
+            && nt.title is string && nt.title.size() <= 256
+            && nt.message is string && nt.message.size() <= 1024
+            && nt.type in ["success", "error", "warning", "info"]
+            && nt.read is bool;
+        }
+      }
+
+      // ManualReviews subcollection rule match
+      match /manualReviews/{reviewId} {
+        allow get: if isAuthorized(candidateId);
+        allow list: if isAuthorized(candidateId);
+        allow create, update: if isAuthorized(candidateId) 
+                              && isValidManualReviewQueueItem(incoming()) 
+                              && incoming().candidateId == candidateId 
+                              && incoming().id == reviewId;
+        allow delete: if isAuthorized(candidateId);
+
+        function isValidManualReviewQueueItem(mr) {
+          return mr.id == reviewId
+            && mr.candidateId == candidateId
+            && mr.reason in ["login_failed", "captcha_required", "otp_required", "missing_profile_data", "missing_resume", "unknown_question", "low_confidence_answer", "job_link_expired", "apply_button_not_found", "portal_blocked_automation"]
+            && mr.description is string && mr.description.size() <= 2048;
+        }
+      }
+    }
+  }
+}
