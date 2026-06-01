@@ -20,13 +20,31 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Firebase SDK using the generated config file
-const firebaseConfigPath = path.join(__dirname, "firebase-applet-config.json");
-const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
-const firebaseApp = initializeApp(firebaseConfig);
-const firestoreDb = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+// Initialize Firebase SDK safely with robust fallback to prevent crash on non-configured environments
+let firebaseApp: any = null;
+let firestoreDb: any = null;
 
-const app = express();
+try {
+  let firebaseConfig: any = null;
+  const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(firebaseConfigPath)) {
+    firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
+  } else if (process.env.FIREBASE_CONFIG_JSON) {
+    firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG_JSON);
+  }
+
+  if (firebaseConfig) {
+    firebaseApp = initializeApp(firebaseConfig);
+    firestoreDb = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+    console.log("Firebase App & Firestore successfully initialized from config.");
+  } else {
+    console.warn("firebase-applet-config.json not found and FIREBASE_CONFIG_JSON env is missing. Operating in local JSON database mode.");
+  }
+} catch (err) {
+  console.error("Failed to initialize Firebase database integration:", err);
+}
+
+export const app = express();
 const PORT = 3000;
 
 app.use(express.json());
@@ -51,7 +69,7 @@ function getGemini(): GoogleGenAI | null {
 }
 
 // Database JSON File Path
-const DB_PATH = path.join(__dirname, "src", "db.json");
+const DB_PATH = path.join(process.cwd(), "src", "db.json");
 
 // Helper to get initial DB seed structure
 function getInitialSeedData() {
@@ -350,6 +368,9 @@ async function deleteCandidateFromFirestore(candidateId: string) {
 
 async function initFirestoreCache() {
   try {
+    if (!firestoreDb) {
+      throw new Error("Cloud Firestore is not initialized or configured. Operating in local JSON mode.");
+    }
     console.log("Checking Firestore for candidates...");
     const candidatesSnapshot = await getDocs(collection(firestoreDb, "candidates"));
     if (candidatesSnapshot.empty) {
@@ -1918,4 +1939,11 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+} else {
+  console.log("On Vercel: Initializing Cloud Firestore Cache...");
+  initFirestoreCache().catch(err => console.error("Firestore cache error on Vercel:", err));
+}
+
+export default app;
